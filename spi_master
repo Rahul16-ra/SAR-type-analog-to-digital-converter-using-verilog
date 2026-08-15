@@ -1,0 +1,193 @@
+module spi_master #(
+    parameter integer CLK_FREQ = 100_000_000,
+    parameter integer SPI_FREQ = 10_000_000)(
+    input  wire       clk,
+    input  wire       rst,
+
+    
+    input  wire       start,
+    input  wire [7:0] tx_data,
+
+    
+    output reg        sclk,
+    output reg        mosi,
+    input  wire       miso,
+    output reg        cs_n,
+
+    
+    output reg [7:0]  rx_data,
+
+    
+    output reg        busy,
+    output reg        done
+);
+
+    
+
+    localparam [1:0]
+        IDLE  = 2'b00,
+        LOAD  = 2'b01,
+        TRANS = 2'b10,
+        DONE  = 2'b11;
+
+    reg [1:0] state;
+
+   
+
+    wire spi_tick;
+
+    spi_clock_divider #(
+        .CLK_FREQ(CLK_FREQ),
+        .SPI_FREQ(SPI_FREQ)
+    ) clk_divider (
+        .clk    (clk),
+        .rst    (rst),
+        .enable (busy),
+        .tick   (spi_tick)
+    );
+
+    
+
+    reg [7:0] tx_shift;
+    reg [7:0] rx_shift;
+
+    
+
+    reg [2:0] bit_count;
+
+  
+
+    always @(posedge clk or posedge rst) begin
+
+        if (rst) begin
+
+            state     <= IDLE;
+
+            sclk      <= 1'b0;
+            mosi      <= 1'b0;
+            cs_n      <= 1'b1;
+
+            tx_shift  <= 8'b0;
+            rx_shift  <= 8'b0;
+
+            rx_data   <= 8'b0;
+
+            bit_count <= 3'd0;
+
+            busy      <= 1'b0;
+            done      <= 1'b0;
+
+        end
+        else begin
+
+           
+            done <= 1'b0;
+
+            case (state)
+
+               
+                IDLE: begin
+
+                    sclk      <= 1'b0;
+                    cs_n      <= 1'b1;
+                    busy      <= 1'b0;
+
+                    bit_count <= 3'd0;
+
+                    if (start) begin
+                        state <= LOAD;
+                    end
+
+                end
+
+                
+                LOAD: begin
+
+                    busy <= 1'b1;
+                    cs_n <= 1'b0;
+
+                    sclk <= 1'b0;
+
+                    // Load transmit data
+                    tx_shift <= tx_data;
+
+                    // Clear receive register
+                    rx_shift <= 8'b0;
+
+                    // Start with MSB (setup before first SCLK edge)
+                    mosi <= tx_data[7];
+
+                    bit_count <= 3'd0;
+
+                    state <= TRANS;
+
+                end
+
+                
+                TRANS: begin
+
+                    if (spi_tick) begin
+
+                        
+                        if (sclk == 1'b0) begin
+
+                            sclk <= 1'b1;
+
+                            // Sample MISO
+                            rx_shift <= {rx_shift[6:0], miso};
+
+                        end
+                        
+                        else begin
+
+                            sclk <= 1'b0;
+
+                            if (bit_count == 3'd7) begin
+                                state <= DONE;
+                            end
+                            else begin
+
+                                bit_count <= bit_count + 1'b1;
+
+                                // Shift TX register
+                                tx_shift <= {tx_shift[6:0], 1'b0};
+
+                                // Put next bit on MOSI
+                                mosi <= tx_shift[6];
+
+                            end
+
+                        end
+
+                    end
+
+                end
+
+              
+                DONE: begin
+
+                    busy <= 1'b0;
+                    cs_n <= 1'b1;
+                    sclk <= 1'b0;
+                    mosi <= 1'b0;
+
+                    // Capture complete received byte
+                    rx_data <= rx_shift;
+
+                    done <= 1'b1;
+
+                    state <= IDLE;
+
+                end
+
+                default: begin
+                    state <= IDLE;
+                end
+
+            endcase
+
+        end
+
+    end
+
+endmodule
