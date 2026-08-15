@@ -1,0 +1,115 @@
+`timescale 1ns / 1ps
+
+module adc_spi_tb;
+
+    parameter N = 8;
+
+
+    reg clk;
+    reg reset;
+    reg start_conv;
+
+
+    real Vin;
+    real VREF;
+    real VDAC;
+
+    wire comp_out;
+    wire [N-1:0] dac_code;
+
+    
+
+    wire [N-1:0] adc_value_spi;   // value read back over SPI
+    wire         spi_read_done;
+
+    wire [N-1:0] adc_dout;        // direct ADC output, for comparison
+    wire         adc_eoc;
+
+   
+    adc_spi_top #(
+        .N(N)
+    ) dut (
+        .clk           (clk),
+        .reset         (reset),
+        .start_conv    (start_conv),
+        .comp_out      (comp_out),
+        .dac_code      (dac_code),
+        .adc_value_spi (adc_value_spi),
+        .spi_read_done (spi_read_done),
+        .adc_dout      (adc_dout),
+        .adc_eoc       (adc_eoc)
+    );
+
+    
+    initial begin
+        clk = 0;
+        forever #5 clk = ~clk;
+    end
+
+    
+    always @(*) begin
+        VDAC = (dac_code * VREF) / (2.0 ** N);
+    end
+
+  
+
+    assign comp_out = (Vin >= VDAC);
+
+    
+    task run_test(input real vin_val, input integer test_num);
+        begin
+            Vin = vin_val;
+
+            #20;
+            start_conv = 1;
+            #10;
+            start_conv = 0;
+
+            wait (adc_eoc);
+            #10;
+
+            wait (spi_read_done);
+            #10;
+
+            $display("--------------------------------");
+            $display("Test %0d", test_num);
+            $display("Vin            = %f V", Vin);
+            $display("ADC dout       = %b (%0d)", adc_dout, adc_dout);
+            $display("SPI readback   = %b (%0d)", adc_value_spi, adc_value_spi);
+
+            if (adc_value_spi === adc_dout)
+                $display("SPI link OK - readback matches ADC output");
+            else
+                $display("MISMATCH - SPI readback != ADC output");
+
+            $display("--------------------------------");
+        end
+    endtask
+
+    
+
+    initial begin
+
+        reset      = 1;
+        start_conv = 0;
+
+        Vin  = 0.0;
+        VREF = 5.0;
+
+        #20;
+        reset = 0;
+
+        run_test(2.5, 1);
+        #50;
+
+        run_test(1.0, 2);
+        #50;
+
+        run_test(4.0, 3);
+        #50;
+
+        $finish;
+
+    end
+
+endmodule
