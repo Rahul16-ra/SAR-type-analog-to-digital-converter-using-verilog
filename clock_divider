@@ -1,0 +1,62 @@
+module spi_clock_divider #(
+    parameter integer CLK_FREQ = 100_000_000,
+    parameter integer SPI_FREQ = 10_000_000
+)(
+    input  wire clk,
+    input  wire rst,
+
+    input  wire enable,
+
+    output reg  tick
+);
+
+    // Number of system-clock cycles between
+    // consecutive SPI clock edges.
+    localparam integer DIV_COUNT =
+                    CLK_FREQ / (2 * SPI_FREQ);
+
+    localparam integer COUNT_WIDTH =
+                    (DIV_COUNT <= 1) ? 1 : $clog2(DIV_COUNT);
+
+    reg [COUNT_WIDTH-1:0] count;
+
+    always @(posedge clk or posedge rst) begin
+
+        if (rst) begin
+            count <= 0;
+            tick  <= 1'b0;
+        end
+
+        else begin
+
+            // Default: no tick
+            tick <= 1'b0;
+
+            if (!enable) begin
+
+                count <= 0;
+
+            end
+
+            else begin
+
+                if (count == DIV_COUNT - 1) begin
+
+                    count <= 0;
+                    tick  <= 1'b1;
+
+                end
+
+                else begin
+
+                    count <= count + 1'b1;
+
+                end
+
+            end
+
+        end
+
+    end
+
+endmodule
