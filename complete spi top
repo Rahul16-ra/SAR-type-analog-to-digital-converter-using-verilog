@@ -1,0 +1,128 @@
+`timescale 1ns / 1ps
+
+
+module adc_spi_top #(
+    parameter integer N        = 8,
+    parameter integer CLK_FREQ = 100_000_000,
+    parameter integer SPI_FREQ = 10_000_000
+)(
+    input  wire          clk,
+    input  wire          reset,
+
+    
+    input  wire          start_conv,
+
+   
+    input  wire          comp_out,
+
+    
+    output wire [N-1:0]  dac_code,
+
+   
+    output reg  [N-1:0]  adc_value_spi,
+    output reg            spi_read_done,
+
+   
+    output wire [N-1:0]  adc_dout,
+    output wire           adc_eoc
+);
+
+    
+    wire adc_busy;
+
+    sar_adc #(
+        .N(N)
+    ) u_adc (
+        .clk      (clk),
+        .reset    (reset),
+        .start    (start_conv),
+        .comp_out (comp_out),
+        .dac_code (dac_code),
+        .dout     (adc_dout),
+        .busy     (adc_busy),
+        .eoc      (adc_eoc)
+    );
+
+   
+
+    reg [N-1:0] adc_result_reg;
+    reg         data_ready;
+
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            adc_result_reg <= {N{1'b0}};
+            data_ready     <= 1'b0;
+        end
+        else begin
+            data_ready <= 1'b0;
+
+            if (adc_eoc) begin
+                adc_result_reg <= adc_dout;
+                data_ready     <= 1'b1;
+            end
+        end
+    end
+
+
+    reg spi_start_r;
+
+    always @(posedge clk or posedge reset) begin
+        if (reset)
+            spi_start_r <= 1'b0;
+        else
+            spi_start_r <= data_ready;
+    end
+
+    wire       sclk_w, mosi_w, cs_n_w, miso_w;
+    wire [7:0] spi_master_rx;
+    wire       spi_master_done;
+    wire       spi_master_busy;
+
+    spi_master #(
+        .CLK_FREQ (CLK_FREQ),
+        .SPI_FREQ (SPI_FREQ)
+    ) u_spi_master (
+        .clk     (clk),
+        .rst     (reset),
+        .start   (spi_start_r),
+        .tx_data (8'h00),          // host has nothing meaningful to send
+        .sclk    (sclk_w),
+        .mosi    (mosi_w),
+        .miso    (miso_w),
+        .cs_n    (cs_n_w),
+        .rx_data (spi_master_rx),
+        .busy    (spi_master_busy),
+        .done    (spi_master_done)
+    );
+
+    spi_slave #(
+        .CLK_FREQ (CLK_FREQ)
+    ) u_spi_slave (
+        .clk     (clk),
+        .rst     (reset),
+        .sclk    (sclk_w),
+        .cs_n    (cs_n_w),
+        .mosi    (mosi_w),
+        .miso    (miso_w),
+        .tx_data (adc_result_reg),
+        .rx_data (),                // unused
+        .busy    (),                // unused
+        .done    ()                 // unused
+    );
+
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            adc_value_spi <= {N{1'b0}};
+            spi_read_done <= 1'b0;
+        end
+        else begin
+            spi_read_done <= 1'b0;
+
+            if (spi_master_done) begin
+                adc_value_spi <= spi_master_rx;
+                spi_read_done <= 1'b1;
+            end
+        end
+    end
+
+endmodule
